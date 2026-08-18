@@ -54,13 +54,64 @@ db.exec(`
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS game_state (
+    id      INTEGER PRIMARY KEY CHECK (id = 1),
+    day     INTEGER NOT NULL CHECK (day >= 1),
+    hour    INTEGER NOT NULL CHECK (hour BETWEEN 0 AND 23),
+    credits INTEGER NOT NULL CHECK (credits >= 0),
+    rating  INTEGER NOT NULL CHECK (rating BETWEEN 0 AND 100),
+    status  TEXT    NOT NULL CHECK (status IN ('running','won','lost')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS deliveries_rover_idx ON deliveries(rover_id);
   CREATE INDEX IF NOT EXISTS deliveries_order_idx ON deliveries(order_id);
   CREATE INDEX IF NOT EXISTS events_created_idx   ON events(created_at DESC);
 `);
 
+/** Добавляет колонку, если её ещё нет: база с каркаса уже существует,
+ *  и ронять её ради новых полей незачем. */
+function ensureColumn(table, column, ddl) {
+  const has = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!has) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddl}`);
+}
+
+// Игровые часы вместо реального времени: доставка живёт в игровом времени,
+// а оно тикает независимо от того, сколько секунд назад создана запись.
+ensureColumn('deliveries', 'started_hour', 'INTEGER');
+ensureColumn('deliveries', 'delay_hours', 'REAL NOT NULL DEFAULT 0');
+ensureColumn('orders', 'created_hour', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('orders', 'kind', "TEXT NOT NULL DEFAULT 'normal'");
+ensureColumn('events', 'day', 'INTEGER');
+ensureColumn('events', 'hour', 'INTEGER');
+
+/** Доставки из каркаса заведены до появления игрового времени: у них нет
+ *  started_hour, и движок не смог бы их досчитать. Закрываем как failed,
+ *  роверов освобождаем. */
+export function closeLegacyDeliveries() {
+  const legacy = db.prepare(
+    `SELECT id, rover_id FROM deliveries WHERE status = 'in_progress' AND started_hour IS NULL`).all();
+  if (!legacy.length) return 0;
+
+  db.transaction(() => {
+    for (const d of legacy) {
+      db.prepare(`UPDATE deliveries SET status = 'failed' WHERE id = ?`).run(d.id);
+      db.prepare(`UPDATE rovers SET status = 'idle', updated_at = datetime('now') WHERE id = ?`).run(d.rover_id);
+      db.prepare(`INSERT INTO events (type, message, rover_id) VALUES (?, ?, ?)`).run(
+        'migration', `Доставка #${d.id} закрыта при переходе на игровое время`, d.rover_id);
+    }
+  })();
+  return legacy.length;
+}
+
 /** Сид только при пустой базе: перезапуск сервера не должен плодить дубли. */
 export function seedIfEmpty() {
+  // Состояние игры заводится отдельно: таблица появилась позже роверов,
+  // и в уже существующей базе её строки ещё нет.
+  db.prepare(
+    `INSERT OR IGNORE INTO game_state (id, day, hour, credits, rating, status)
+     VALUES (1, 1, 0, 0, 100, 'running')`).run();
+
   const { n } = db.prepare('SELECT count(*) AS n FROM rovers').get();
   if (n > 0) return false;
 
