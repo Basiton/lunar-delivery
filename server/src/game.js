@@ -5,7 +5,7 @@ import { ZONES, ZONE_BY_ID } from './zones.js';
 // симулятором; переменные окружения позволяют пробовать другие, не трогая код.
 const num = (name, def) => Number(process.env[name] ?? def);
 
-export const TICK_MS = 3000;        // 3 секунды реального времени
+export const TICK_MS = num('TICK_MS', 3000);  // 3 секунды реального времени на игровой час
 export const HOURS_PER_DAY = 24;    // 24 игровых часа = лунные сутки
 export const WIN_DAYS = 7;
 export const WIN_CREDITS = num('WIN_CREDITS', 28000);
