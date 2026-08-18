@@ -2,12 +2,15 @@ import { batteryColor } from './layout.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 
-export default function TopBar({ gameState, inTransit, onNewGame }) {
-  const { day, hour, credits, rating } = gameState;
+export default function TopBar({ gameState, inTransit, onNewGame, onTogglePause }) {
+  const { day, hour, credits, rating, paused } = gameState;
 
   return (
-    <header className="topbar">
-      <div className="brand-title">Lunar Delivery</div>
+    <header className={`topbar${paused ? ' paused' : ''}`}>
+      <div className="brand-title">
+        Lunar Delivery
+        {Boolean(paused) && <span className="pause-badge">пауза</span>}
+      </div>
 
       <div className="stat">
         <span className="stat-label">сутки</span>
@@ -37,6 +40,10 @@ export default function TopBar({ gameState, inTransit, onNewGame }) {
         <span className="stat-value">{inTransit}</span>
       </div>
 
+      <button type="button" className="ghost-btn pause-btn" onClick={onTogglePause}
+              title="пробел">
+        {paused ? '▶ Продолжить' : '⏸ Пауза'}
+      </button>
       <button type="button" className="ghost-btn" onClick={onNewGame}>Новая игра</button>
     </header>
   );

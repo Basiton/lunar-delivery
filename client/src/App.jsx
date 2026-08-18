@@ -76,6 +76,26 @@ export default function App() {
     await send('/api/game/reset');
   }
 
+  const togglePause = useCallback(() => {
+    if (state?.game_state.status !== 'running') return;
+    send('/api/game/pause');
+  }, [state]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Пробел — пауза. preventDefault нужен дважды: он гасит прокрутку страницы
+  // и не даёт пробелу «нажать» кнопку, на которой остался фокус, иначе пауза
+  // переключилась бы дважды за одно нажатие.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.code !== 'Space' || e.repeat) return;
+      const tag = e.target?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      togglePause();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [togglePause]);
+
   if (!state) {
     return <div className="app-loading">{notice?.text ?? 'Загрузка карты…'}</div>;
   }
@@ -88,11 +108,12 @@ export default function App() {
 
   return (
     <div className="app">
-      <TopBar gameState={game} inTransit={inTransit} onNewGame={newGame} />
+      <TopBar gameState={game} inTransit={inTransit} onNewGame={newGame} onTogglePause={togglePause} />
 
       <div className="map-wrap">
         <MoonMap
           state={state}
+          paused={Boolean(game.paused)}
           selectedOrder={selectedOrder}
           selectedRover={selectedRover}
           onSelectOrder={(id) => setSelectedOrder((cur) => (cur === id ? null : id))}

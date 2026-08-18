@@ -84,6 +84,8 @@ ensureColumn('orders', 'created_hour', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('orders', 'kind', "TEXT NOT NULL DEFAULT 'normal'");
 ensureColumn('events', 'day', 'INTEGER');
 ensureColumn('events', 'hour', 'INTEGER');
+// Пауза живёт на сервере: иначе поллинг раз в две секунды сбрасывал бы её.
+ensureColumn('game_state', 'paused', 'INTEGER NOT NULL DEFAULT 0');
 
 /** Доставки из каркаса заведены до появления игрового времени: у них нет
  *  started_hour, и движок не смог бы их досчитать. Закрываем как failed,
@@ -112,7 +114,7 @@ export function resetGame() {
     db.exec(`DELETE FROM sqlite_sequence WHERE name IN ('deliveries','events','orders','rovers')`);
     db.prepare(
       `UPDATE game_state SET day = 1, hour = 0, credits = 0, rating = 100,
-              status = 'running', updated_at = datetime('now') WHERE id = 1`).run();
+              status = 'running', paused = 0, updated_at = datetime('now') WHERE id = 1`).run();
   })();
   seedIfEmpty();
 }

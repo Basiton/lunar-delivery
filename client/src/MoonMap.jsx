@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { CENTER, CRATERS, MOON_R, VIEW, ZONE_R, orderPos, riskColor, zonePos } from './layout.js';
 
 /** Путь «база -> зона -> база» для анимации ровера. */
@@ -6,14 +7,25 @@ function routePath(zone) {
   return `M ${CENTER.x} ${CENTER.y} L ${p.x} ${p.y} L ${CENTER.x} ${CENTER.y}`;
 }
 
-export default function MoonMap({ state, selectedOrder, selectedRover, onSelectOrder }) {
+export default function MoonMap({ state, paused, selectedOrder, selectedRover, onSelectOrder }) {
+  const svgRef = useRef(null);
+
+  // На паузе стоит и движение роверов: SMIL умеет замирать сам,
+  // без пересоздания элементов и рестарта анимации.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    if (paused) svg.pauseAnimations();
+    else svg.unpauseAnimations();
+  }, [paused, state.deliveries.length]);
+
   const { zones, orders, deliveries, rovers } = state;
   const zoneById = new Map(zones.map((z) => [z.id, z]));
   const openOrders = orders.filter((o) => o.status === 'open');
   const active = deliveries.filter((d) => d.status === 'in_progress');
 
   return (
-    <svg className="map" viewBox={`0 0 ${VIEW} ${VIEW}`} role="img" aria-label="Карта Луны">
+    <svg ref={svgRef} className="map" viewBox={`0 0 ${VIEW} ${VIEW}`} role="img" aria-label="Карта Луны">
       <defs>
         <radialGradient id="moon" cx="38%" cy="32%">
           <stop offset="0%" stopColor="#3a4152" />

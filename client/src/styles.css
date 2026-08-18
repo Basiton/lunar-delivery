@@ -44,7 +44,31 @@ body {
   border-radius: 0.75rem;
 }
 
-.brand-title { font-size: 1.05rem; font-weight: 700; letter-spacing: 0.01em; margin-right: auto; }
+.brand-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  margin-right: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.topbar.paused { border-color: #7a6220; }
+
+.pause-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: #fcd34d;
+  background: #2a2411;
+  border: 1px solid #7a6220;
+  border-radius: 0.3rem;
+  padding: 0.1rem 0.4rem;
+}
+
+.pause-btn { min-width: 7.5rem; }
 
 .stat { display: flex; flex-direction: column; min-width: 4.5rem; }
 .stat-label { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.09em; color: var(--muted); }

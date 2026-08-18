@@ -1,15 +1,20 @@
 import { db } from './db.js';
-import { ZONES } from './zones.js';
+import { ZONES, ZONE_BY_ID } from './zones.js';
 
 export const TICK_MS = 3000;        // 3 секунды реального времени
 export const HOURS_PER_DAY = 24;    // 24 игровых часа = лунные сутки
 export const WIN_DAYS = 7;
 export const WIN_CREDITS = 5000;
 
-export const CHARGE_PER_HOUR = 10;
-export const ORDER_EVERY_HOURS = 6;
-export const PENALTY_EXPIRED = 10;
-export const PENALTY_DECLINED = 5;
+// Значения по умолчанию — из ТЗ. Переменные окружения нужны симулятору
+// баланса, чтобы подбирать числа, не трогая код.
+const num = (name, def) => Number(process.env[name] ?? def);
+
+export const CHARGE_PER_HOUR = num('CHARGE_PER_HOUR', 10);
+export const ORDER_EVERY_HOURS = num('ORDER_EVERY_HOURS', 6);
+export const PENALTY_EXPIRED = num('PENALTY_EXPIRED', 10);
+export const PENALTY_DECLINED = num('PENALTY_DECLINED', 5);
+export const BONUS_ON_TIME = num('BONUS_ON_TIME', 3);
 
 // ---------------------------------------------------------------- формулы
 // Реализованы дословно по ТЗ.
@@ -129,11 +134,69 @@ function spawnOrder({ oversized = false } = {}) {
   return Number(lastInsertRowid);
 }
 
+// ---------------------------------------------------------------- отправка
+/**
+ * Единая точка старта рейса: её вызывают и HTTP-маршрут, и симулятор баланса.
+ * Возвращает { ok } либо { ok: false, code, error } с причиной для пользователя.
+ */
+export function startDelivery(rover_id, order_id) {
+  const rover = db.prepare('SELECT * FROM rovers WHERE id = ?').get(rover_id);
+  if (!rover) return { ok: false, code: 404, error: `ровер ${rover_id} не найден` };
+
+  const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(order_id);
+  if (!order) return { ok: false, code: 404, error: `заказ ${order_id} не найден` };
+
+  const zone = ZONE_BY_ID.get(order.zone_id);
+  if (!zone) return { ok: false, code: 500, error: `неизвестная зона ${order.zone_id}` };
+
+  if (order.status !== 'open') return { ok: false, code: 422, error: 'Заказ уже не в работе' };
+
+  // Порядок проверок — как в ТЗ: вес, батарея, занятость.
+  if (order.weight_kg > rover.capacity_kg) {
+    return { ok: false, code: 422, error: 'Груз тяжелее грузоподъёмности' };
+  }
+
+  const cost = batteryCost(zone, order.weight_kg, rover.capacity_kg);
+  if (cost > rover.battery) return { ok: false, code: 422, error: 'Не хватит батареи' };
+
+  if (rover.status !== 'idle') return { ok: false, code: 422, error: 'Ровер занят' };
+
+  const eta = roundTripHours(zone, order.weight_kg, rover.capacity_kg);
+
+  return db.transaction(() => {
+    // На паузе рейс тоже можно завести: он стартует с текущего игрового часа,
+    // а часы стоят — значит движение начнётся после снятия паузы.
+    const started_hour = totalHours(getState());
+    const { lastInsertRowid } = db.prepare(
+      `INSERT INTO deliveries (rover_id, order_id, started_hour, eta_hours, battery_cost, status)
+       VALUES (?, ?, ?, ?, ?, 'in_progress')`)
+      .run(rover_id, order_id, started_hour, eta, Math.round(cost));
+
+    const id = Number(lastInsertRowid);
+    db.prepare(`UPDATE orders SET status = 'assigned' WHERE id = ?`).run(order_id);
+    db.prepare(`UPDATE rovers SET status = 'delivering', updated_at = datetime('now') WHERE id = ?`)
+      .run(rover_id);
+    logEvent('delivery_created',
+      `«${rover.name}» вышел в «${zone.name}» с заказом «${order.title}»: ${eta.toFixed(1)} ч, −${Math.round(cost)} батареи`,
+      rover_id, order_id);
+
+    const risk = rollRisk(zone, rover, order, id);
+    return {
+      ok: true,
+      delivery: db.prepare('SELECT * FROM deliveries WHERE id = ?').get(id),
+      risk,
+      cost,
+      eta,
+    };
+  })();
+}
+
 // ---------------------------------------------------------------- тик
 /** Один тик = один игровой час. Всё внутри одной транзакции. */
 export const tick = db.transaction(() => {
   const before = getState();
   if (before.status !== 'running') return { skipped: true, state: before };
+  if (before.paused) return { skipped: true, paused: true, state: before };
 
   // 1. часы
   const nextTotal = totalHours(before) + 1;
@@ -155,7 +218,8 @@ export const tick = db.transaction(() => {
 
   // 3. доставки
   const running = db.prepare(
-    `SELECT d.*, o.reward, o.title AS order_title, r.name AS rover_name, r.battery
+    `SELECT d.*, o.reward, o.title AS order_title, o.created_hour, o.deadline_hours,
+            r.name AS rover_name, r.battery
      FROM deliveries d
      JOIN orders o ON o.id = d.order_id
      JOIN rovers r ON r.id = d.rover_id
@@ -171,9 +235,21 @@ export const tick = db.transaction(() => {
       `UPDATE rovers SET battery = max(0, battery - ?), status = 'idle', updated_at = datetime('now')
        WHERE id = ?`).run(cost, d.rover_id);
     addCredits(d.reward);
+
+    // В срок — если рейс закончился не позже дедлайна заказа.
+    const onTime = nextTotal <= d.created_hour + d.deadline_hours;
     logEvent('delivered',
       `«${d.rover_name}» доставил «${d.order_title}»: +${d.reward} ₡, −${cost} батареи`,
       d.rover_id, d.order_id);
+
+    if (onTime) {
+      addRating(BONUS_ON_TIME);
+      logEvent('rating_up',
+        `Доставка «${d.order_title}» в срок: рейтинг +${BONUS_ON_TIME}`, d.rover_id, d.order_id);
+    } else {
+      logEvent('delivered_late',
+        `Доставка «${d.order_title}» с опозданием: без прибавки к рейтингу`, d.rover_id, d.order_id);
+    }
   }
 
   // 4. просрочка (только открытые: назначенные уже в пути)

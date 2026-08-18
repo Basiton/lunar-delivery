@@ -1,9 +1,8 @@
 import express from 'express';
 import { closeLegacyDeliveries, db, resetGame, seedIfEmpty } from './db.js';
-import { ZONES, ZONE_BY_ID } from './zones.js';
+import { ZONES } from './zones.js';
 import {
-  CHARGE_PER_HOUR, PENALTY_DECLINED, batteryCost, getState, logEvent,
-  rollRisk, roundTripHours, startClock, totalHours,
+  CHARGE_PER_HOUR, PENALTY_DECLINED, getState, logEvent, startClock, startDelivery,
 } from './game.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -52,59 +51,13 @@ app.post('/api/deliveries', (req, res) => {
     return res.status(400).json({ error: 'rover_id и order_id обязательны и должны быть целыми числами' });
   }
 
-  const rover = q.rover.get(rover_id);
-  if (!rover) return res.status(404).json({ error: `ровер ${rover_id} не найден` });
-
-  const order = q.order.get(order_id);
-  if (!order) return res.status(404).json({ error: `заказ ${order_id} не найден` });
-
-  const zone = ZONE_BY_ID.get(order.zone_id);
-  if (!zone) return res.status(500).json({ error: `неизвестная зона ${order.zone_id}` });
-
-  if (order.status !== 'open') {
-    return res.status(422).json({ error: 'Заказ уже не в работе' });
-  }
-
-  // Порядок проверок — как в ТЗ: вес, батарея, занятость.
-  if (order.weight_kg > rover.capacity_kg) {
-    return res.status(422).json({ error: 'Груз тяжелее грузоподъёмности' });
-  }
-
-  const cost = batteryCost(zone, order.weight_kg, rover.capacity_kg);
-  if (cost > rover.battery) {
-    return res.status(422).json({ error: 'Не хватит батареи' });
-  }
-
-  if (rover.status !== 'idle') {
-    return res.status(422).json({ error: 'Ровер занят' });
-  }
-
-  const eta = roundTripHours(zone, order.weight_kg, rover.capacity_kg);
-
-  const result = db.transaction(() => {
-    const started_hour = totalHours(getState());
-    const { lastInsertRowid } = db.prepare(
-      `INSERT INTO deliveries (rover_id, order_id, started_hour, eta_hours, battery_cost, status)
-       VALUES (?, ?, ?, ?, ?, 'in_progress')`)
-      .run(rover_id, order_id, started_hour, eta, Math.round(cost));
-
-    const id = Number(lastInsertRowid);
-    db.prepare(`UPDATE orders SET status = 'assigned' WHERE id = ?`).run(order_id);
-    db.prepare(`UPDATE rovers SET status = 'delivering', updated_at = datetime('now') WHERE id = ?`)
-      .run(rover_id);
-    logEvent('delivery_created',
-      `«${rover.name}» вышел в «${zone.name}» с заказом «${order.title}»: ${eta.toFixed(1)} ч, −${Math.round(cost)} батареи`,
-      rover_id, order_id);
-
-    // Бросок риска сразу при старте: он может отменить всё выше.
-    const risk = rollRisk(zone, rover, order, id);
-    return { delivery: q.delivery.get(id), risk };
-  })();
+  const result = startDelivery(rover_id, order_id);
+  if (!result.ok) return res.status(result.code).json({ error: result.error });
 
   res.status(201).json({
     ...result.delivery,
-    battery_cost_exact: Number(cost.toFixed(2)),
-    eta_hours_exact: Number(eta.toFixed(2)),
+    battery_cost_exact: Number(result.cost.toFixed(2)),
+    eta_hours_exact: Number(result.eta.toFixed(2)),
     risk: result.risk,
   });
 });
@@ -147,6 +100,19 @@ app.post('/api/orders/:id/decline', (req, res) => {
   })();
 
   res.json({ order: q.order.get(order.id), game_state: getState() });
+});
+
+/** Пауза хранится в game_state, поэтому переживает и поллинг, и перезагрузку вкладки. */
+app.post('/api/game/pause', (req, res) => {
+  if (gameOver(res)) return;
+
+  const current = getState();
+  const paused = req.body?.paused == null ? !current.paused : Boolean(req.body.paused);
+  db.prepare(`UPDATE game_state SET paused = ?, updated_at = datetime('now') WHERE id = 1`)
+    .run(paused ? 1 : 0);
+  logEvent(paused ? 'paused' : 'resumed', paused ? 'Игра на паузе' : 'Игра продолжена');
+
+  res.json(getState());
 });
 
 // Единственный эндпоинт, доступный после победы или поражения.
