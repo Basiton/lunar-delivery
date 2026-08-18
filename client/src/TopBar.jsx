@@ -1,9 +1,9 @@
-import { batteryColor } from './layout.js';
+import { batteryColor, daysLived } from './layout.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 
 export default function TopBar({ gameState, rules, inTransit, onNewGame, onTogglePause }) {
-  const { day, hour, credits, rating, paused } = gameState;
+  const { hour, credits, rating, paused } = gameState;
 
   return (
     <header className={`topbar${paused ? ' paused' : ''}`}>
@@ -14,7 +14,7 @@ export default function TopBar({ gameState, rules, inTransit, onNewGame, onToggl
 
       <div className="stat">
         <span className="stat-label">сутки</span>
-        <span className="stat-value">{day}<span className="stat-sub"> / {rules.win_days}</span></span>
+        <span className="stat-value">{daysLived(gameState)}<span className="stat-sub"> / {rules.win_days}</span></span>
       </div>
 
       <div className="stat">

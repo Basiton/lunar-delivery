@@ -5,6 +5,10 @@
 //   1. поднимите игру:  TICK_MS=250 npm run dev
 //   2. запустите:       node scripts/screenshots.mjs
 //
+// Можно переснять не всё, а отдельные кадры:
+//   node scripts/screenshots.mjs --only result
+//   node scripts/screenshots.mjs --only map,rejection
+//
 // TICK_MS ускоряет только ход часов, правила и формулы те же самые.
 // Нужен playwright, он не входит в зависимости игры:
 //   npm i -D playwright
@@ -12,6 +16,13 @@ import { mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+
+const SHOTS = ['map', 'rejection', 'events', 'result'];
+const argv = process.argv.slice(2);
+const only = argv.includes('--only')
+  ? argv[argv.indexOf('--only') + 1].split(',').map((s) => s.trim())
+  : SHOTS;
+const want = (name) => only.includes(name);
 
 const API = process.env.API ?? 'http://localhost:3001';
 const UI = process.env.UI ?? 'http://localhost:5173';
@@ -135,17 +146,8 @@ async function clickOrder(page, title) {
 const clickRover = (page, name) =>
   page.locator('.rover-card', { hasText: name }).locator('.rover-main').click();
 
-async function main() {
-  mkdirSync(DOCS, { recursive: true });
-
-  const browser = await chromium.launch({ channel: 'chrome' }).catch(() => chromium.launch());
-  const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } });
-  await page.goto(UI, { waitUntil: 'networkidle' });
-
-  // ---------------------------------------------------------------- новая партия
-  await post('/api/game/reset');
-  log('новая игра');
-
+// ---------------------------------------------------------------- карта и отказ
+async function shotMapAndRejection(page) {
   // Играем до вторых суток: на карте уже есть кредиты, рейсы и заявка на негабарит,
   // а «Пилигрим» (60 кг) намеренно стоит на базе — он понадобится для отказа.
   const HOLD = [1];
@@ -160,10 +162,13 @@ async function main() {
     return s.orders.some((o) => rejection(rover, o, zoneById.get(o.zone_id)));
   }, { hold: HOLD, decline: false });
 
-  // Карту снимаем на ходу, без паузы: так выглядит обычная партия.
-  await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('g.order').first().waitFor();
-  await shot(page, '01-map.png');
+  if (want('map')) {
+    // Карту снимаем на ходу, без паузы: так выглядит обычная партия.
+    await page.reload({ waitUntil: 'networkidle' });
+    await page.locator('g.order').first().waitFor();
+    await shot(page, '01-map.png');
+  }
+  if (!want('rejection')) return;
 
   // ---------------------------------------------------------------- отказ
   // Здесь пауза нужна: иначе выбранный заказ протухнет прямо во время кликов.
@@ -192,13 +197,14 @@ async function main() {
   await clickOrder(page, target.o.title);
   await clickRover(page, rover.name);
   await pause(false);
+}
 
-  // ---------------------------------------------------------------- журнал
-  // Играем дальше, пока в верхних строках журнала не соберутся разные типы:
-  // доставка, происшествие в пути и потеря рейтинга. Запас в три строки — на
-  // события, которые успеют добавиться, пока делается снимок.
-  // Нужные события должны стоять с запасом выше нижней строки: пока делается
-  // снимок, журнал успевает подрасти и сдвинуть их вниз.
+// ---------------------------------------------------------------- журнал
+async function shotEvents(page) {
+  // Играем, пока в верхних строках журнала не соберутся разные типы: доставка,
+  // происшествие в пути и потеря рейтинга. Нужные события должны стоять с
+  // запасом выше нижней строки: пока делается снимок, журнал успевает
+  // подрасти и сдвинуть их вниз.
   const at = (types, ok) => types.findIndex(ok);
   const within = (types, ok, n) => { const i = at(types, ok); return i >= 0 && i < n; };
 
@@ -215,8 +221,10 @@ async function main() {
   await page.reload({ waitUntil: 'networkidle' });
   await page.locator('.log li').first().waitFor();
   await shot(page, '03-events.png');
+}
 
-  // ---------------------------------------------------------------- финал
+// ---------------------------------------------------------------- финал
+async function shotResult(page) {
   // Играем до конца партии. Если базу довели до нуля рейтинга — начинаем заново:
   // на экране результата хочется видеть выигранную партию.
   let final = null;
@@ -229,8 +237,30 @@ async function main() {
   }
 
   await sleep(POLL_SETTLE);
+  // Экран результата — оверлей поверх всей страницы, поэтому снимаем окно, а не
+  // страницу целиком.
   await page.screenshot({ path: join(DOCS, '04-result.png') });
   log('снято', '04-result.png');
+}
+
+async function main() {
+  mkdirSync(DOCS, { recursive: true });
+
+  const unknown = only.filter((n) => !SHOTS.includes(n));
+  if (unknown.length) throw new Error(`неизвестный кадр: ${unknown.join(', ')}; есть ${SHOTS.join(', ')}`);
+
+  const browser = await chromium.launch({ channel: 'chrome' }).catch(() => chromium.launch());
+  const page = await browser.newPage({ viewport: { width: WIDTH, height: HEIGHT } });
+  await page.goto(UI, { waitUntil: 'networkidle' });
+
+  // Каждый запуск начинается с новой партии: кадры должны показывать игру
+  // с начала, а не то, что осталось от прошлого прогона.
+  await post('/api/game/reset');
+  log('новая игра');
+
+  if (want('map') || want('rejection')) await shotMapAndRejection(page);
+  if (want('events')) await shotEvents(page);
+  if (want('result')) await shotResult(page);
 
   await browser.close();
   console.log('готово, скриншоты в docs/');

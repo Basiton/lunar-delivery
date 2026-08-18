@@ -3,6 +3,7 @@ import MoonMap from './MoonMap.jsx';
 import RoverPanel from './RoverPanel.jsx';
 import TopBar from './TopBar.jsx';
 import EventLog from './EventLog.jsx';
+import { daysLived } from './layout.js';
 
 const POLL_MS = 2000;
 
@@ -168,7 +169,7 @@ export default function App() {
                 : 'Рейтинг базы упал до нуля — контракт расторгнут.'}
             </p>
             <div className="result-stats">
-              <div><span>сутки</span><strong>{game.day}</strong></div>
+              <div><span>сутки</span><strong>{daysLived(game)}</strong></div>
               <div><span>кредиты</span><strong>{game.credits} ₡</strong></div>
               <div><span>рейтинг</span><strong>{game.rating}</strong></div>
             </div>
