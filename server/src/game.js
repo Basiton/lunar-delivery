@@ -14,7 +14,7 @@ export const CHARGE_PER_HOUR = num('CHARGE_PER_HOUR', 10);
 export const ORDER_EVERY_HOURS = num('ORDER_EVERY_HOURS', 6);
 export const PENALTY_EXPIRED = num('PENALTY_EXPIRED', 10);
 export const PENALTY_DECLINED = num('PENALTY_DECLINED', 5);
-export const BONUS_ON_TIME = num('BONUS_ON_TIME', 10);
+export const BONUS_ON_TIME = num('BONUS_ON_TIME', 12);
 
 // ---------------------------------------------------------------- формулы
 // Реализованы дословно по ТЗ.
