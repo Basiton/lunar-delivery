@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import MoonMap from './MoonMap.jsx';
 import RoverPanel from './RoverPanel.jsx';
+import TopBar from './TopBar.jsx';
+import EventLog from './EventLog.jsx';
 
 const POLL_MS = 2000;
 
 export default function App() {
   const [state, setState] = useState(null);
-  const [error, setError] = useState(null);
+  const [notice, setNotice] = useState(null); // отказы сервера показываем пользователю
   const [selectedRover, setSelectedRover] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
-  const [sending, setSending] = useState(false);
+  const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
 
   // Единственный источник данных — /api/state. Ответ не накладывается сам на
@@ -21,9 +23,8 @@ export default function App() {
       const res = await fetch('/api/state');
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       setState(await res.json());
-      setError(null);
     } catch (e) {
-      setError(e.message);
+      setNotice({ kind: 'error', text: `Нет связи с сервером: ${e.message}` });
     } finally {
       inFlight.current = false;
     }
@@ -35,40 +36,60 @@ export default function App() {
     return () => clearInterval(id);
   }, [load]);
 
-  async function dispatch() {
-    if (!selectedRover || !selectedOrder) return;
-    setSending(true);
+  /** Любой изменяющий запрос: причину отказа (422) показываем как есть. */
+  async function send(url, body) {
+    setBusy(true);
+    setNotice(null);
     try {
-      const res = await fetch('/api/deliveries', {
+      const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rover_id: selectedRover, order_id: selectedOrder }),
+        body: body ? JSON.stringify(body) : undefined,
       });
-      if (!res.ok) throw new Error((await res.json()).error ?? `HTTP ${res.status}`);
-      setSelectedRover(null);
-      setSelectedOrder(null);
-      await load(); // не ждём следующего такта поллинга
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotice({ kind: 'error', text: data.error ?? `Ошибка ${res.status}` });
+        return null;
+      }
+      await load();
+      return data;
     } catch (e) {
-      setError(e.message);
+      setNotice({ kind: 'error', text: e.message });
+      return null;
     } finally {
-      setSending(false);
+      setBusy(false);
     }
   }
 
-  if (!state) {
-    return (
-      <div className="app">
-        <p className="loading">{error ? `Ошибка загрузки: ${error}` : 'Загрузка карты…'}</p>
-      </div>
-    );
+  async function dispatchDelivery() {
+    if (!selectedRover || !selectedOrder) return;
+    const data = await send('/api/deliveries', { rover_id: selectedRover, order_id: selectedOrder });
+    if (!data) return;
+    setSelectedRover(null);
+    setSelectedOrder(null);
+    if (data.risk) setNotice({ kind: 'warn', text: `Происшествие в пути: ${data.risk.message}` });
   }
 
+  async function newGame() {
+    setSelectedRover(null);
+    setSelectedOrder(null);
+    await send('/api/game/reset');
+  }
+
+  if (!state) {
+    return <div className="app-loading">{notice?.text ?? 'Загрузка карты…'}</div>;
+  }
+
+  const game = state.game_state;
   const order = state.orders.find((o) => o.id === selectedOrder);
   const rover = state.rovers.find((r) => r.id === selectedRover);
-  const ready = Boolean(order && rover);
+  const inTransit = state.deliveries.filter((d) => d.status === 'in_progress').length;
+  const finished = game.status !== 'running';
 
   return (
     <div className="app">
+      <TopBar gameState={game} inTransit={inTransit} onNewGame={newGame} />
+
       <div className="map-wrap">
         <MoonMap
           state={state}
@@ -79,15 +100,11 @@ export default function App() {
       </div>
 
       <aside className="sidebar">
-        <header className="brand">
-          <h1>Lunar Delivery</h1>
-          <span className="muted">{state.deliveries.filter((d) => d.status === 'in_progress').length} в пути</span>
-        </header>
-
         <RoverPanel
           rovers={state.rovers}
           selectedRover={selectedRover}
           onSelectRover={(id) => setSelectedRover((cur) => (cur === id ? null : id))}
+          onCharge={(id) => send(`/api/rovers/${id}/charge`)}
         />
 
         <section className="panel dispatch">
@@ -100,24 +117,45 @@ export default function App() {
             <span className="slot-label">заказ</span>
             <span className={order ? '' : 'muted'}>{order ? order.title : 'не выбран'}</span>
           </div>
-          {order && rover && order.weight_kg > rover.capacity_kg && (
-            <p className="warn">вес {order.weight_kg} кг больше грузоподъёмности {rover.capacity_kg} кг</p>
-          )}
-          <button type="button" className="dispatch-btn" disabled={!ready || sending} onClick={dispatch}>
-            {sending ? 'Отправляем…' : 'Отправить'}
-          </button>
-          {error && <p className="warn">{error}</p>}
-        </section>
 
-        <section className="panel">
-          <h2>Журнал</h2>
-          <ul className="events">
-            {state.events.slice(0, 8).map((e) => (
-              <li key={e.id}><span className="event-type">{e.type}</span> {e.message}</li>
-            ))}
-          </ul>
+          <button type="button" className="dispatch-btn"
+                  disabled={!order || !rover || busy} onClick={dispatchDelivery}>
+            {busy ? 'Отправляем…' : 'Отправить'}
+          </button>
+
+          {order && (
+            <button type="button" className="decline-btn" disabled={busy}
+                    onClick={() => send(`/api/orders/${order.id}/decline`).then(() => setSelectedOrder(null))}>
+              Отклонить заказ (−5 рейтинга)
+            </button>
+          )}
+
+          {notice && <p className={`notice ${notice.kind}`}>{notice.text}</p>}
         </section>
       </aside>
+
+      <EventLog events={state.events} />
+
+      {finished && (
+        <div className="overlay">
+          <div className={`result ${game.status}`}>
+            <h2>{game.status === 'won' ? 'Победа' : 'Поражение'}</h2>
+            <p className="result-text">
+              {game.status === 'won'
+                ? `База продержалась 7 суток и заработала ${game.credits} ₡.`
+                : 'Рейтинг базы упал до нуля — контракт расторгнут.'}
+            </p>
+            <div className="result-stats">
+              <div><span>сутки</span><strong>{game.day}</strong></div>
+              <div><span>кредиты</span><strong>{game.credits} ₡</strong></div>
+              <div><span>рейтинг</span><strong>{game.rating}</strong></div>
+            </div>
+            <button type="button" className="dispatch-btn" onClick={newGame} disabled={busy}>
+              Новая игра
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

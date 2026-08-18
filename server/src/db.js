@@ -104,6 +104,19 @@ export function closeLegacyDeliveries() {
   return legacy.length;
 }
 
+/** Новая игра: чистим всё игровое и сеем заново.
+ *  sqlite_sequence тоже сбрасываем, иначе id продолжат расти от прошлой партии. */
+export function resetGame() {
+  db.transaction(() => {
+    db.exec('DELETE FROM deliveries; DELETE FROM events; DELETE FROM orders; DELETE FROM rovers;');
+    db.exec(`DELETE FROM sqlite_sequence WHERE name IN ('deliveries','events','orders','rovers')`);
+    db.prepare(
+      `UPDATE game_state SET day = 1, hour = 0, credits = 0, rating = 100,
+              status = 'running', updated_at = datetime('now') WHERE id = 1`).run();
+  })();
+  seedIfEmpty();
+}
+
 /** Сид только при пустой базе: перезапуск сервера не должен плодить дубли. */
 export function seedIfEmpty() {
   // Состояние игры заводится отдельно: таблица появилась позже роверов,

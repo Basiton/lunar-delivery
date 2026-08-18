@@ -1,5 +1,5 @@
 import express from 'express';
-import { closeLegacyDeliveries, db, seedIfEmpty } from './db.js';
+import { closeLegacyDeliveries, db, resetGame, seedIfEmpty } from './db.js';
 import { ZONES, ZONE_BY_ID } from './zones.js';
 import {
   CHARGE_PER_HOUR, PENALTY_DECLINED, batteryCost, getState, logEvent,
@@ -147,6 +147,13 @@ app.post('/api/orders/:id/decline', (req, res) => {
   })();
 
   res.json({ order: q.order.get(order.id), game_state: getState() });
+});
+
+// Единственный эндпоинт, доступный после победы или поражения.
+app.post('/api/game/reset', (req, res) => {
+  resetGame();
+  logEvent('game_reset', 'Новая игра: база восстановлена, роверы заряжены');
+  res.json(getState());
 });
 
 app.use((req, res) => res.status(404).json({ error: `не найдено: ${req.method} ${req.path}` }));
