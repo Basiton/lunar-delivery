@@ -1,20 +1,20 @@
 import { db } from './db.js';
 import { ZONES, ZONE_BY_ID } from './zones.js';
 
+// Балансовые константы. Значения по умолчанию — рабочие, подобранные
+// симулятором; переменные окружения позволяют пробовать другие, не трогая код.
+const num = (name, def) => Number(process.env[name] ?? def);
+
 export const TICK_MS = 3000;        // 3 секунды реального времени
 export const HOURS_PER_DAY = 24;    // 24 игровых часа = лунные сутки
 export const WIN_DAYS = 7;
-export const WIN_CREDITS = 5000;
-
-// Значения по умолчанию — из ТЗ. Переменные окружения нужны симулятору
-// баланса, чтобы подбирать числа, не трогая код.
-const num = (name, def) => Number(process.env[name] ?? def);
+export const WIN_CREDITS = num('WIN_CREDITS', 28000);
 
 export const CHARGE_PER_HOUR = num('CHARGE_PER_HOUR', 10);
 export const ORDER_EVERY_HOURS = num('ORDER_EVERY_HOURS', 6);
 export const PENALTY_EXPIRED = num('PENALTY_EXPIRED', 10);
 export const PENALTY_DECLINED = num('PENALTY_DECLINED', 5);
-export const BONUS_ON_TIME = num('BONUS_ON_TIME', 3);
+export const BONUS_ON_TIME = num('BONUS_ON_TIME', 10);
 
 // ---------------------------------------------------------------- формулы
 // Реализованы дословно по ТЗ.

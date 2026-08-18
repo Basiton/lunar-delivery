@@ -108,7 +108,8 @@ export default function App() {
 
   return (
     <div className="app">
-      <TopBar gameState={game} inTransit={inTransit} onNewGame={newGame} onTogglePause={togglePause} />
+      <TopBar gameState={game} rules={state.rules} inTransit={inTransit} onNewGame={newGame}
+              onTogglePause={togglePause} />
 
       <div className="map-wrap">
         <MoonMap
@@ -147,7 +148,7 @@ export default function App() {
           {order && (
             <button type="button" className="decline-btn" disabled={busy}
                     onClick={() => send(`/api/orders/${order.id}/decline`).then(() => setSelectedOrder(null))}>
-              Отклонить заказ (−5 рейтинга)
+              Отклонить заказ (−{state.rules.penalty_declined} рейтинга)
             </button>
           )}
 
@@ -163,7 +164,7 @@ export default function App() {
             <h2>{game.status === 'won' ? 'Победа' : 'Поражение'}</h2>
             <p className="result-text">
               {game.status === 'won'
-                ? `База продержалась 7 суток и заработала ${game.credits} ₡.`
+                ? `База продержалась ${state.rules.win_days} суток и заработала ${game.credits} ₡.`
                 : 'Рейтинг базы упал до нуля — контракт расторгнут.'}
             </p>
             <div className="result-stats">

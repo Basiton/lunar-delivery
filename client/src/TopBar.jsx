@@ -2,7 +2,7 @@ import { batteryColor } from './layout.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 
-export default function TopBar({ gameState, inTransit, onNewGame, onTogglePause }) {
+export default function TopBar({ gameState, rules, inTransit, onNewGame, onTogglePause }) {
   const { day, hour, credits, rating, paused } = gameState;
 
   return (
@@ -14,7 +14,7 @@ export default function TopBar({ gameState, inTransit, onNewGame, onTogglePause 
 
       <div className="stat">
         <span className="stat-label">сутки</span>
-        <span className="stat-value">{day}<span className="stat-sub"> / 7</span></span>
+        <span className="stat-value">{day}<span className="stat-sub"> / {rules.win_days}</span></span>
       </div>
 
       <div className="stat">
@@ -24,7 +24,7 @@ export default function TopBar({ gameState, inTransit, onNewGame, onTogglePause 
 
       <div className="stat">
         <span className="stat-label">кредиты</span>
-        <span className="stat-value credits">{credits}<span className="stat-sub"> / 5000 ₡</span></span>
+        <span className="stat-value credits">{credits}<span className="stat-sub"> / {rules.win_credits} ₡</span></span>
       </div>
 
       <div className="stat rating-stat">

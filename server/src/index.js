@@ -2,7 +2,8 @@ import express from 'express';
 import { closeLegacyDeliveries, db, resetGame, seedIfEmpty } from './db.js';
 import { ZONES } from './zones.js';
 import {
-  CHARGE_PER_HOUR, PENALTY_DECLINED, getState, logEvent, startClock, startDelivery,
+  BONUS_ON_TIME, CHARGE_PER_HOUR, PENALTY_DECLINED, PENALTY_EXPIRED, WIN_CREDITS, WIN_DAYS,
+  getState, logEvent, startClock, startDelivery,
 } from './game.js';
 
 const PORT = Number(process.env.PORT ?? 3001);
@@ -34,6 +35,14 @@ app.get('/api/state', (req, res) => {
   res.json({
     now: new Date().toISOString(),
     game_state: getState(),
+    // Условия победы и штрафы отдаём клиенту, чтобы интерфейс не дублировал числа.
+    rules: {
+      win_days: WIN_DAYS,
+      win_credits: WIN_CREDITS,
+      bonus_on_time: BONUS_ON_TIME,
+      penalty_expired: PENALTY_EXPIRED,
+      penalty_declined: PENALTY_DECLINED,
+    },
     zones: ZONES,
     rovers: q.rovers.all(),
     orders: q.orders.all(),

@@ -18,7 +18,7 @@ process.env.DB_PATH = join(mkdtempSync(join(tmpdir(), 'lunar-sim-')), 'sim.db');
 const { db, resetGame } = await import('./db.js');
 const { ZONE_BY_ID } = await import('./zones.js');
 const {
-  batteryCost, roundTripHours, startDelivery, tick, getState, totalHours, HOURS_PER_DAY,
+  batteryCost, roundTripHours, startDelivery, tick, getState, totalHours, HOURS_PER_DAY, WIN_CREDITS,
 } = await import('./game.js');
 
 /** Ход игрока: заряжаем севших, отклоняем неподъёмное, раздаём выгодные рейсы. */
@@ -94,8 +94,29 @@ results.forEach((r, i) => {
 });
 
 console.log(`\nдожили до 7 суток: ${survived}/${RUNS}`);
-console.log(`победили (7 суток и 5000 ₡): ${won}/${RUNS}`);
+console.log(`победили (7 суток и ${WIN_CREDITS} ₡): ${won}/${RUNS}`);
 console.log(`медиана: кредиты ${med(results.map((r) => r.credits))},`
   + ` рейтинг ${med(results.map((r) => r.rating))},`
   + ` доставок ${med(results.map((r) => r.delivered))},`
   + ` просрочек ${med(results.map((r) => r.expired))}`);
+
+// Порог победы не влияет на ход партии: проверка срабатывает только на седьмых
+// сутках, поэтому кандидатов можно оценивать по одной и той же серии прогонов.
+const THRESHOLDS = argv.includes('--thresholds')
+  ? argv[argv.indexOf('--thresholds') + 1].split(',').map(Number)
+  : [];
+
+if (THRESHOLDS.length) {
+  const alive = results.filter((r) => r.status !== 'lost');
+  const credits = alive.map((r) => r.credits).sort((a, b) => a - b);
+  const pct = (q) => credits[Math.floor((credits.length - 1) * q)];
+
+  console.log('\nкредиты у дошедших до 7 суток: p10 ' + pct(0.1) + ', p25 ' + pct(0.25)
+    + ', медиана ' + pct(0.5) + ', p75 ' + pct(0.75) + ', макс ' + pct(1));
+  console.log('\n  цель, кредитов | побед из ' + RUNS + ' | доля');
+  for (const t of THRESHOLDS) {
+    const wins = alive.filter((r) => r.credits >= t).length;
+    console.log('  ' + String(t).padStart(14) + ' | ' + String(wins).padStart(11)
+      + ' | ' + (wins / RUNS * 100).toFixed(0) + '%');
+  }
+}
