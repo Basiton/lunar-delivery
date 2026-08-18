@@ -4,8 +4,10 @@ node_modules/
 # Build output
 dist/
 
-# Databases
+# Databases (в режиме WAL SQLite держит рядом -wal и -shm)
 *.db
+*.db-wal
+*.db-shm
 
 # Environment
 .env

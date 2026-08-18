@@ -1,0 +1,89 @@
+import Database from 'better-sqlite3';
+import { mkdirSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const DB_PATH = process.env.DB_PATH ?? join(here, '..', 'data', 'lunar.db');
+
+mkdirSync(dirname(DB_PATH), { recursive: true });
+
+export const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+// Статусы держим CHECK-ограничениями: SQLite не знает enum, а без них
+// опечатка в статусе тихо ляжет в базу и всплывёт уже в игровой логике.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS rovers (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT    NOT NULL,
+    battery     INTEGER NOT NULL CHECK (battery BETWEEN 0 AND 100),
+    capacity_kg REAL    NOT NULL CHECK (capacity_kg > 0),
+    status      TEXT    NOT NULL CHECK (status IN ('idle','delivering','charging','damaged')),
+    updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS orders (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    title          TEXT    NOT NULL,
+    weight_kg      REAL    NOT NULL CHECK (weight_kg > 0),
+    reward         INTEGER NOT NULL CHECK (reward >= 0),
+    deadline_hours REAL    NOT NULL CHECK (deadline_hours > 0),
+    zone_id        TEXT    NOT NULL,
+    status         TEXT    NOT NULL CHECK (status IN ('open','assigned','delivered','failed','expired')),
+    created_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS deliveries (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    rover_id     INTEGER NOT NULL REFERENCES rovers(id),
+    order_id     INTEGER NOT NULL REFERENCES orders(id),
+    started_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    eta_hours    REAL,
+    battery_cost INTEGER,
+    status       TEXT    NOT NULL CHECK (status IN ('in_progress','done','failed'))
+  );
+
+  CREATE TABLE IF NOT EXISTS events (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    type       TEXT NOT NULL,
+    message    TEXT NOT NULL,
+    rover_id   INTEGER REFERENCES rovers(id),
+    order_id   INTEGER REFERENCES orders(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  );
+
+  CREATE INDEX IF NOT EXISTS deliveries_rover_idx ON deliveries(rover_id);
+  CREATE INDEX IF NOT EXISTS deliveries_order_idx ON deliveries(order_id);
+  CREATE INDEX IF NOT EXISTS events_created_idx   ON events(created_at DESC);
+`);
+
+/** Сид только при пустой базе: перезапуск сервера не должен плодить дубли. */
+export function seedIfEmpty() {
+  const { n } = db.prepare('SELECT count(*) AS n FROM rovers').get();
+  if (n > 0) return false;
+
+  const insertRover = db.prepare(
+    `INSERT INTO rovers (name, battery, capacity_kg, status) VALUES (?, 100, ?, 'idle')`);
+  const insertOrder = db.prepare(
+    `INSERT INTO orders (title, weight_kg, reward, deadline_hours, zone_id, status)
+     VALUES (?, ?, ?, ?, ?, 'open')`);
+  const insertEvent = db.prepare(
+    `INSERT INTO events (type, message) VALUES (?, ?)`);
+
+  db.transaction(() => {
+    insertRover.run('Пилигрим', 60);
+    insertRover.run('Селена', 90);
+    insertRover.run('Тяжеловоз', 120);
+
+    insertOrder.run('Комплект солнечных панелей', 48, 1200, 12, 'tranquillitatis');
+    insertOrder.run('Медблок для станции', 72, 2100, 20, 'copernicus');
+    insertOrder.run('Буровая установка', 110, 3400, 36, 'shackleton');
+    insertOrder.run('Запас кислорода', 35, 900, 8, 'procellarum');
+
+    insertEvent.run('seed', 'База инициализирована: 3 ровера, 4 заказа');
+  })();
+
+  return true;
+}

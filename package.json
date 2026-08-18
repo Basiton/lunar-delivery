@@ -1,0 +1,18 @@
+{
+  "name": "lunar-delivery",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
+    "dev:server": "npm run dev --workspace server",
+    "dev:client": "npm run dev --workspace client"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.5"
+  }
+}
